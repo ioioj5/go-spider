@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"time"
+	"log"
 )
 
 const ImageSaveDir = "./images/" // 图片保存目录
@@ -66,7 +67,7 @@ func main() {
 	// 数据库
 	db, err = sql.Open("mysql", "root:123456@tcp(localhost:3306)/spider_youzan?charset=utf8")
 	if err != nil {
-		fmt.Printf("error: %s", err)
+		log.Printf("%T %+v", err, err)
 	}
 
 	db.SetMaxIdleConns(10)                    //连接池中最大空闲连接数
@@ -74,7 +75,7 @@ func main() {
 	db.SetConnMaxLifetime(7200 * time.Second) //连接的最大空闲时间(可选)
 	err = db.Ping()
 	if err != nil {
-		fmt.Printf("error: %s", err)
+		log.Printf("%T %+v", err, err)
 	}
 	defer db.Close()
 	// 运行
@@ -89,7 +90,7 @@ func main() {
 func run() {
 	rows, err := db.Query("SELECT `id` as `recordId`, `category`, `goodsAlias`, `json`, `isChanged`, `shopChanged`, `goodsChanged`, `parseTime` FROM `tbl_spider_record`")
 	if err != nil {
-		fmt.Printf("error1:%s", err)
+		log.Printf("%T %+v", err, err)
 		return
 	}
 	defer rows.Close()
@@ -107,46 +108,44 @@ func run() {
 
 		err = rows.Scan(&recordId, &category, &goodsAlias, &jsonString, &isChanged, &shopChanged, &goodsChanged, &parseTime)
 		if err != nil {
-			//log.Fatal(err)
-			panic(err.Error())
+			log.Printf("%T %+v", err, err)
 		}
 		// 解析json
 		var g Goods
 		err = json.Unmarshal([]byte(jsonString), &g)
 		if err != nil {
-			fmt.Printf("error2:%s", err)
+			log.Printf("%T %+v", err, err)
 			return
 		}
 
 		g.toString(i)
-		//ch := make(chan string)
+		ch := make(chan string)
 		// time.Sleep(10 * time.Second)
 		for _, imageUrl := range g.GoodsDetail.AttachmentUrls {
-			fetchImage(imageUrl, g.GoodsDetail.Alias)
+			go fetchImage(imageUrl, g.GoodsDetail.Alias, ch)
 		}
-		//for range g.GoodsDetail.AttachmentUrls {
-		//	//fmt.Println(<-ch) // receive from channel ch
-		//}
+		for range g.GoodsDetail.AttachmentUrls {
+			//fmt.Println(<-ch) // receive from channel ch
+		}
 
 		i++
 	}
 	if err = rows.Close(); err != nil {
 		// but what should we do if there's an error?
-		//log.Println(err)
-		fmt.Printf("error3:%s", err)
+		log.Printf("%T %+v", err, err)
 		return
 	}
 	fmt.Println("total:", i)
 }
 
 // 获取图片
-func fetchImage(url string, alias string) {
+func fetchImage(url string, alias string, ch chan string) {
 	startDownload := time.Now()
 
 	resp, err := http.Get(url)
 	if err != nil {
-		// ch <- fmt.Sprint(err) // send to channel ch
-		fmt.Println(err)
+		 ch <- fmt.Sprint(err) // send to channel ch
+		// log.Printf("%T %+v", err, err)
 		return
 	}
 
@@ -156,22 +155,22 @@ func fetchImage(url string, alias string) {
 	fileName := GetMd5String(alias) + "-" + UniqueId() + fileType
 	dst, err := os.Create(ImageSaveDir + fileName)
 	if err != nil {
-		//ch <- fmt.Sprint(err) // send to channel ch
-		fmt.Println(err)
+		ch <- fmt.Sprint(err) // send to channel ch
+		// log.Printf("%T %+v", err, err)
 		return
 	}
 	//fmt.Println(ImageSaveDir + fileName)
 	nbytes, err := io.Copy(dst, resp.Body)
 	resp.Body.Close()
 	if err != nil {
-		// ch <- fmt.Sprint(err) // send to channel ch
-		fmt.Println(err)
+		ch <- fmt.Sprint(err) // send to channel ch
+		// log.Printf("%T %+v", err, err)
 		return
 	}
 
 	secs := time.Since(startDownload).Seconds()
-	// ch <- fmt.Sprintf("%.2fs  %7d  %s", secs, nbytes, url)
-	fmt.Printf("%.2fs  %7d  %s \n", secs, nbytes, url)
+	ch <- fmt.Sprintf("%.2fs  %7d  %s", secs, nbytes, url)
+	// fmt.Printf("%.2fs  %7d  %s \n", secs, nbytes, url)
 }
 
 // 生成s的md5

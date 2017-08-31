@@ -1,3 +1,4 @@
 .git
 .idea
+images
 !.gitignore
