@@ -10,17 +10,26 @@ import (
 	"encoding/json"
 	_ "github.com/go-sql-driver/mysql"
 	"io"
-	"net/http"
-	"os"
-	"path/filepath"
+	//"net/http"
+	//"os"
+	//"path/filepath"
 	"strconv"
 	"time"
 	"log"
+	"sync"
+	m "math/rand"
+	"net/http"
+	"path/filepath"
+	"os"
 )
 
 const ImageSaveDir = "./images/" // 图片保存目录
 var db *sql.DB
+var wg sync.WaitGroup
 
+func init() {
+	m.Seed(time.Now().Unix()) // 初始化随机种子数
+}
 // 结构化goods
 type Goods struct {
 	GoodsDetail struct {
@@ -119,15 +128,20 @@ func run() {
 		}
 
 		g.toString(i)
-		ch := make(chan string)
+		tasks := make(chan string, 10)
+		wg.Add(4)
+		for gr := 1; gr <= 4; gr++ {
+			go fetchImage(tasks, gr)
+		}
 		// time.Sleep(10 * time.Second)
 		for _, imageUrl := range g.GoodsDetail.AttachmentUrls {
-			go fetchImage(imageUrl, g.GoodsDetail.Alias, ch)
+			tasks <- imageUrl
 		}
-		for range g.GoodsDetail.AttachmentUrls {
-			//fmt.Println(<-ch) // receive from channel ch
-		}
-
+		//for range g.GoodsDetail.AttachmentUrls {
+		//	fmt.Println(<-ch) // receive from channel ch
+		//}
+		close(tasks)
+		wg.Wait()
 		i++
 	}
 	if err = rows.Close(); err != nil {
@@ -139,38 +153,51 @@ func run() {
 }
 
 // 获取图片
-func fetchImage(url string, alias string, ch chan string) {
-	startDownload := time.Now()
+func fetchImage(tasks chan string, gr int) {
+	defer wg.Done()
 
-	resp, err := http.Get(url)
-	if err != nil {
-		 ch <- fmt.Sprint(err) // send to channel ch
-		// log.Printf("%T %+v", err, err)
-		return
+	for {
+		task, ok := <-tasks
+		if !ok {
+			// fmt.Printf("[ %d ] Shutting Down \n", gr)
+			return
+		}
+		// fmt.Printf("[ %s ] [ %d ] Started \n", task, gr)
+
+		// ...
+		startDownload := time.Now()
+		resp, err := http.Get(task)
+		if err != nil {
+			log.Printf("%T %+v", err, err)
+			return
+		}
+		//body, err := ioutil.ReadAll(resp.Body)
+		fileType := filepath.Ext(task)
+		// 生成md5字符串
+		fileName := GetMd5String(string(m.Int())) + "-" + UniqueId() + fileType
+		dst, err := os.Create(ImageSaveDir + fileName)
+		if err != nil {
+			log.Printf("%T %+v", err, err)
+			return
+		}
+		//fmt.Println(ImageSaveDir + fileName)
+		nbytes, err := io.Copy(dst, resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			log.Printf("%T %+v", err, err)
+			return
+		}
+
+		secs := time.Since(startDownload).Seconds()
+		// fmt.Printf("%.2fs  %7d  %s \n", secs, nbytes, url)
+		// ...
+
+		fmt.Printf("[ %.2fs ] [ %7d ] [ %s ] [ %d ] Completed \n", secs, nbytes, task, gr)
 	}
 
-	//body, err := ioutil.ReadAll(resp.Body)
-	fileType := filepath.Ext(url)
-	// 生成md5字符串
-	fileName := GetMd5String(alias) + "-" + UniqueId() + fileType
-	dst, err := os.Create(ImageSaveDir + fileName)
-	if err != nil {
-		ch <- fmt.Sprint(err) // send to channel ch
-		// log.Printf("%T %+v", err, err)
-		return
-	}
-	//fmt.Println(ImageSaveDir + fileName)
-	nbytes, err := io.Copy(dst, resp.Body)
-	resp.Body.Close()
-	if err != nil {
-		ch <- fmt.Sprint(err) // send to channel ch
-		// log.Printf("%T %+v", err, err)
-		return
-	}
 
-	secs := time.Since(startDownload).Seconds()
-	ch <- fmt.Sprintf("%.2fs  %7d  %s", secs, nbytes, url)
-	// fmt.Printf("%.2fs  %7d  %s \n", secs, nbytes, url)
+
+
 }
 
 // 生成s的md5
