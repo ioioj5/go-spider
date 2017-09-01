@@ -10,17 +10,13 @@ import (
 	"encoding/json"
 	_ "github.com/go-sql-driver/mysql"
 	"io"
-	//"net/http"
-	//"os"
-	//"path/filepath"
-	"strconv"
-	"time"
 	"log"
-	"sync"
 	m "math/rand"
+	"strconv"
+	"sync"
+	"time"
 	"net/http"
-	"path/filepath"
-	"os"
+	"io/ioutil"
 )
 
 const ImageSaveDir = "./images/" // 图片保存目录
@@ -29,7 +25,9 @@ var wg sync.WaitGroup
 
 func init() {
 	m.Seed(time.Now().Unix()) // 初始化随机种子数
+	// runtime.GOMAXPROCS(runtime.NumCPU())
 }
+
 // 结构化goods
 type Goods struct {
 	GoodsDetail struct {
@@ -128,9 +126,10 @@ func run() {
 		}
 
 		g.toString(i)
-		tasks := make(chan string, 10)
-		wg.Add(4)
-		for gr := 1; gr <= 4; gr++ {
+		max_concurrent_count := 10
+		tasks := make(chan string, max_concurrent_count)
+		wg.Add(max_concurrent_count)
+		for gr := 1; gr <= max_concurrent_count; gr++ {
 			go fetchImage(tasks, gr)
 		}
 		// time.Sleep(10 * time.Second)
@@ -164,6 +163,7 @@ func fetchImage(tasks chan string, gr int) {
 		}
 		// fmt.Printf("[ %s ] [ %d ] Started \n", task, gr)
 
+		// fmt.Printf("[ %s ] [ %s ] [ %d ] Completed \n", time.Now().Format("Jan _2 15:04:05.000000000"), task, gr)
 		// ...
 		startDownload := time.Now()
 		resp, err := http.Get(task)
@@ -171,32 +171,29 @@ func fetchImage(tasks chan string, gr int) {
 			log.Printf("%T %+v", err, err)
 			return
 		}
-		//body, err := ioutil.ReadAll(resp.Body)
-		fileType := filepath.Ext(task)
-		// 生成md5字符串
-		fileName := GetMd5String(string(m.Int())) + "-" + UniqueId() + fileType
-		dst, err := os.Create(ImageSaveDir + fileName)
-		if err != nil {
-			log.Printf("%T %+v", err, err)
-			return
-		}
-		//fmt.Println(ImageSaveDir + fileName)
-		nbytes, err := io.Copy(dst, resp.Body)
+		////body, err := ioutil.ReadAll(resp.Body)
+		//fileType := filepath.Ext(task)
+		//// 生成md5字符串
+		//fileName := GetMd5String(string(m.Int())) + "-" + UniqueId() + fileType
+		//dst, err := os.Create(ImageSaveDir + fileName)
+		//if err != nil {
+		//	log.Printf("%T %+v", err, err)
+		//	return
+		//}
+		////fmt.Println(ImageSaveDir + fileName)
+		nbytes,err := io.Copy(ioutil.Discard, resp.Body)
 		resp.Body.Close()
 		if err != nil {
 			log.Printf("%T %+v", err, err)
 			return
 		}
 
-		secs := time.Since(startDownload).Seconds()
+		//end := time.Since(startDownload).Seconds()
 		// fmt.Printf("%.2fs  %7d  %s \n", secs, nbytes, url)
 		// ...
 
-		fmt.Printf("[ %.2fs ] [ %7d ] [ %s ] [ %d ] Completed \n", secs, nbytes, task, gr)
+		fmt.Printf("[ %s ] [ %s ] [ %7d ] [ %s ] [ %d ] Completed \n", startDownload.Format("15:04:05.000000000"), time.Now().Format("15:04:05.000000000"), nbytes, task, gr)
 	}
-
-
-
 
 }
 
