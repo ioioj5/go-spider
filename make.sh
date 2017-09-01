@@ -5,4 +5,4 @@ export GOPATH=$pwd
 
 go get github.com/go-sql-driver/mysql
 
-go build -v -o bin/parse parse
+go build -v -o ./parse parse
